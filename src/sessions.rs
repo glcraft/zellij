@@ -12,7 +12,7 @@ use zellij_utils::{
         ZELLIJ_SESSION_INFO_CACHE_DIR, ZELLIJ_SOCK_DIR,
     },
     envs,
-    input::layout::Layout,
+    input::{config::Config, layout::Layout},
     ipc::{ClientToServerMsg, IpcReceiverWithContext, IpcSenderWithContext, ServerToClientMsg},
 };
 
@@ -40,7 +40,7 @@ pub(crate) fn get_sessions() -> Result<Vec<(String, Duration)>, io::ErrorKind> {
     }
 }
 
-pub(crate) fn get_resurrectable_sessions() -> Vec<(String, Duration, Layout)> {
+pub(crate) fn get_resurrectable_sessions() -> Vec<(String, Duration, Layout, Config)> {
     match fs::read_dir(&*ZELLIJ_SESSION_INFO_CACHE_DIR) {
         Ok(files_in_session_info_folder) => {
             let files_that_are_folders = files_in_session_info_folder
@@ -74,6 +74,13 @@ pub(crate) fn get_resurrectable_sessions() -> Vec<(String, Duration, Layout)> {
                             return None;
                         },
                     };
+                    let config = match Config::from_kdl(&raw_layout, None) {
+                        Ok(config) => config,
+                        Err(e) => {
+                            log::error!("Failed to parse resurrection config file: {}", e);
+                            return None;
+                        },
+                    };
                     let elapsed_duration = ctime
                         .map(|ctime| {
                             Duration::from_secs(ctime.elapsed().ok().unwrap_or_default().as_secs())
@@ -82,7 +89,7 @@ pub(crate) fn get_resurrectable_sessions() -> Vec<(String, Duration, Layout)> {
                     let session_name = folder_name
                         .file_name()
                         .map(|f| std::path::PathBuf::from(f).display().to_string())?;
-                    Some((session_name, elapsed_duration, layout))
+                    Some((session_name, elapsed_duration, layout, config))
                 })
                 .collect()
         },
@@ -291,7 +298,9 @@ pub(crate) fn list_sessions(no_formatting: bool, short: bool, reverse: bool) {
             let resurrectable_sessions = get_resurrectable_sessions();
             let mut all_sessions: HashMap<String, (Duration, bool)> = resurrectable_sessions
                 .iter()
-                .map(|(name, timestamp, _layout)| (name.clone(), (timestamp.clone(), true)))
+                .map(|(name, timestamp, _layout, _config)| {
+                    (name.clone(), (timestamp.clone(), true))
+                })
                 .collect();
             for (session_name, duration) in running_sessions {
                 all_sessions.insert(session_name.clone(), (duration, false));
@@ -362,13 +371,13 @@ pub(crate) fn session_exists(name: &str) -> Result<bool, io::ErrorKind> {
 }
 
 // if the session is resurrecable, the returned layout is the one to be used to resurrect it
-pub(crate) fn resurrection_layout(session_name_to_resurrect: &str) -> Option<Layout> {
+pub(crate) fn resurrection_layout(session_name_to_resurrect: &str) -> Option<(Layout, Config)> {
     let resurrectable_sessions = get_resurrectable_sessions();
     resurrectable_sessions
-        .iter()
-        .find_map(|(name, _timestamp, layout)| {
+        .into_iter()
+        .find_map(|(name, _timestamp, layout, config)| {
             if name == session_name_to_resurrect {
-                Some(layout.clone())
+                Some((layout, config))
             } else {
                 None
             }

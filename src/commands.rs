@@ -76,7 +76,7 @@ pub(crate) fn delete_all_sessions(yes: bool, force: bool) {
     } else {
         resurrectable_sessions
             .iter()
-            .filter(|(name, _, _)| !active_sessions.contains(name))
+            .filter(|(name, _, _, _)| !active_sessions.contains(name))
             .cloned()
             .collect()
     };
@@ -533,10 +533,17 @@ pub(crate) fn start_client(opts: CliArgs) {
                     session_name.clone().map(start_client_plan);
                 }
                 match (session_name.as_ref(), resurrection_layout) {
-                    (Some(session_name), Some(mut resurrection_layout)) if !session_exists => {
+                    (Some(session_name), Some((mut resurrection_layout, resurrection_config)))
+                        if !session_exists =>
+                    {
                         if force_run_commands {
                             resurrection_layout.recursively_add_start_suspended(Some(false));
                         }
+                        for v in &resurrection_config.background_plugins {
+                            config.background_plugins.insert(v.clone());
+                        }
+                        let _ = config_options.merge(resurrection_config.options.clone());
+                        let _ = config.merge(resurrection_config);
                         ClientInfo::Resurrect(session_name.clone(), resurrection_layout)
                     },
                     _ => attach_with_session_name(
